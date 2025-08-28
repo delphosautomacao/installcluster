@@ -4,7 +4,62 @@
 # ==============================================================================
 
 # Importa funções comuns
-source "$(dirname "$0")/common.sh"
+source "$(dirname "${BASH_SOURCE[0]}")/common.sh"
+
+# Função para instalar o binário oficial do Nomad
+install_nomad_binary() {
+  local NOMAD_VERSION="1.7.2"
+  local NOMAD_URL="https://releases.hashicorp.com/nomad/${NOMAD_VERSION}/nomad_${NOMAD_VERSION}_linux_amd64.zip"
+  local TEMP_DIR="/tmp/nomad_install"
+  
+  log_info "Baixando Nomad ${NOMAD_VERSION}..."
+  
+  # Cria diretório temporário
+  mkdir -p "$TEMP_DIR"
+  cd "$TEMP_DIR"
+  
+  # Baixa o Nomad
+  if ! wget -q "$NOMAD_URL" -O nomad.zip; then
+    log_error "Falha ao baixar Nomad de $NOMAD_URL"
+    return 1
+  fi
+  
+  # Instala unzip se necessário
+  if ! command -v unzip >/dev/null 2>&1; then
+    log_info "Instalando unzip..."
+    apt-get update -qq
+    apt-get install -yq unzip
+  fi
+  
+  # Extrai o binário
+  if ! unzip -q nomad.zip; then
+    log_error "Falha ao extrair nomad.zip"
+    return 1
+  fi
+  
+  # Move para /usr/bin
+  if ! mv nomad /usr/bin/nomad; then
+    log_error "Falha ao mover nomad para /usr/bin"
+    return 1
+  fi
+  
+  # Define permissões
+  chmod +x /usr/bin/nomad
+  
+  # Limpa arquivos temporários
+  cd /
+  rm -rf "$TEMP_DIR"
+  
+  # Verifica instalação
+  if nomad version >/dev/null 2>&1; then
+    log_info "Nomad instalado com sucesso: $(nomad version | head -n1)"
+  else
+    log_error "Falha na verificação da instalação do Nomad"
+    return 1
+  fi
+  
+  return 0
+}
 
 # Função para instalar e configurar o Nomad
 setup_nomad() {
@@ -18,17 +73,19 @@ setup_nomad() {
   local NOMAD_HCL="$8"
   local NOMAD_JOIN="$9"
   local NOMAD_SERVERS_IN="${10}"
-  local CONSUL_BOOTSTRAP_EXPECT="${11}"
+  local NOMAD_BOOTSTRAP_EXPECT="${11}"
 
   log_info "Instalando Nomad..."
-  apt-get install -yq --no-install-recommends nomad
+  install_nomad_binary
 
-  # Usuário/grupo para servidor (mínimo privilégio)
-  if ! getent group "${NOMAD_GROUP}" >/dev/null; then
-    groupadd --system "${NOMAD_GROUP}"
+  # Cria usuário/grupo se não existir
+  if ! getent group "${NOMAD_GROUP}" >/dev/null 2>&1; then
+    log_info "Criando grupo ${NOMAD_GROUP}..."
+    addgroup --system "${NOMAD_GROUP}" || log_warn "Falha ao criar grupo ${NOMAD_GROUP}"
   fi
   if ! id -u "${NOMAD_USER}" >/dev/null 2>&1; then
-    useradd --system --no-create-home --shell /usr/sbin/nologin --gid "${NOMAD_GROUP}" "${NOMAD_USER}"
+    log_info "Criando usuário ${NOMAD_USER}..."
+    adduser --system --no-create-home --shell /usr/sbin/nologin --ingroup "${NOMAD_GROUP}" "${NOMAD_USER}" || log_warn "Falha ao criar usuário ${NOMAD_USER}"
   fi
 
   # Dirs base / permissões
@@ -76,7 +133,7 @@ consul {
 
 server {
   enabled          = true
-  bootstrap_expect = ${CONSUL_BOOTSTRAP_EXPECT}
+  bootstrap_expect = ${NOMAD_BOOTSTRAP_EXPECT}
   # retry_join pode ser configurado aqui para formar cluster de servers (opcional)
   # retry_join = ["10.0.0.10","10.0.0.11"]
 }
@@ -98,7 +155,7 @@ acl {
 }
 HCL
     chown root:"${NOMAD_GROUP}" "$NOMAD_HCL"
-    chmod 0640 "$NOMAD_HCL"
+    chmod 0600 "$NOMAD_HCL"  # Mais seguro para arquivos de configuração
 
     # systemd do servidor (não-root)
     cat >/etc/systemd/system/nomad.service <<UNIT
@@ -163,7 +220,7 @@ client {
 }
 HCL
     chown root:"${NOMAD_GROUP}" "$NOMAD_HCL"
-    chmod 0640 "$NOMAD_HCL"
+    chmod 0600 "$NOMAD_HCL"  # Mais seguro para arquivos de configuração
 
     # systemd do cliente (root)
     cat >/etc/systemd/system/nomad.service <<UNIT
@@ -189,7 +246,12 @@ UNIT
   fi
 
   # Adiciona usuário nomad ao grupo docker para executar containers
-  usermod -aG docker nomad
+  if getent group docker >/dev/null 2>&1; then
+    log_info "Adicionando usuário ${NOMAD_USER} ao grupo docker..."
+    gpasswd -a "${NOMAD_USER}" docker || log_warn "Falha ao adicionar usuário ao grupo docker"
+  else
+    log_warn "Grupo docker não encontrado. Usuário ${NOMAD_USER} não foi adicionado ao grupo docker."
+  fi
 	
   # Habilita conforme papel
   systemctl daemon-reload

@@ -14,6 +14,11 @@ source "${SCRIPT_DIR}/lib/nomad.sh"
 # Verifica se está rodando como root
 check_root
 
+# Configurações padrão
+INSTALL_DOCKER="n"
+INSTALL_CONSUL="n"
+INSTALL_NOMAD="n"
+
 # Verifica se deve executar em modo não-interativo
 INTERACTIVE=true
 if [[ "$1" == "--non-interactive" || "$1" == "-n" ]]; then
@@ -26,11 +31,6 @@ if [[ "$1" == "--non-interactive" || "$1" == "-n" ]]; then
     source "$2"
   fi
 fi
-
-# Configurações padrão
-INSTALL_DOCKER="n"
-INSTALL_CONSUL="n"
-INSTALL_NOMAD="n"
 NOMAD_ROLE="1"
 REGION="global"
 DC="dc1"
@@ -48,8 +48,68 @@ NOMAD_SERVERS=""
 CONSUL_JOIN="n"
 CONSUL_SERVERS=""
 CONSUL_BOOTSTRAP_EXPECT=1
+NOMAD_BOOTSTRAP_EXPECT=1
 CONSUL_ENCRYPT_KEY=""
 CONSUL_ADVERTISE_ADDR=""
+
+## Função para validar configurações antes da instalação
+validate_pre_install() {
+  local errors=0
+  
+  log_info "Validando configurações antes da instalação..."
+  
+  # Verifica se pelo menos um serviço será instalado
+  if [[ "${INSTALL_DOCKER,,}" != "s" && "${INSTALL_CONSUL,,}" != "s" && "${INSTALL_NOMAD,,}" != "s" ]]; then
+    log_warn "Nenhum serviço selecionado para instalação."
+    ((errors++))
+  fi
+  
+  # Validações específicas do Consul
+  if [[ "${INSTALL_CONSUL,,}" == "s" ]]; then
+    if [[ -z "$CONSUL_ADVERTISE_ADDR" ]]; then
+      log_warn "Endereço de anúncio do Consul não definido."
+      ((errors++))
+    fi
+    
+    if [[ "${CONSUL_JOIN,,}" == "s" && -z "${CONSUL_SERVERS// }" ]]; then
+      log_warn "Configurado para juntar-se ao cluster Consul, mas nenhum servidor especificado."
+      ((errors++))
+    fi
+  fi
+  
+  # Validações específicas do Nomad
+  if [[ "${INSTALL_NOMAD,,}" == "s" ]]; then
+    if [[ "$NOMAD_ROLE" != "1" && "$NOMAD_ROLE" != "2" && "$NOMAD_ROLE" != "3" ]]; then
+      log_warn "Papel do Nomad inválido: $NOMAD_ROLE. Deve ser 1, 2 ou 3."
+      ((errors++))
+    fi
+    
+    if [[ "${NOMAD_JOIN,,}" == "s" && -z "${NOMAD_SERVERS// }" ]]; then
+      log_warn "Configurado para juntar-se ao cluster Nomad, mas nenhum servidor especificado."
+      ((errors++))
+    fi
+    
+    # Verifica dependência do Consul para Nomad
+    if [[ "${INSTALL_CONSUL,,}" != "s" ]]; then
+      log_warn "Nomad configurado sem Consul. A integração pode não funcionar corretamente."
+      ((errors++))
+    fi
+  fi
+  
+  if [[ $errors -gt 0 ]]; then
+    log_warn "Foram encontrados $errors problemas na configuração pré-instalação."
+    if [[ "$INTERACTIVE" == "true" ]]; then
+      read -p "Deseja continuar mesmo assim? (s/n) [n]: " continue_install
+      if [[ "${continue_install,,}" != "s" ]]; then
+        fail "Instalação cancelada pelo usuário."
+      fi
+    fi
+  else
+    log_info "Validação pré-instalação concluída com sucesso!"
+  fi
+  
+  return $errors
+}
 
 # Função para exibir o resumo da instalação
 show_summary() {
@@ -136,6 +196,9 @@ main() {
     log_info "- Nomad: ${INSTALL_NOMAD}"
   fi
   
+  # Validação pré-instalação
+  validate_pre_install
+  
   # Configuração do Docker
   if [[ "${INSTALL_DOCKER,,}" == "s" ]]; then
     log_info "Instalando Docker..."
@@ -170,7 +233,7 @@ main() {
       encrypt_option=${encrypt_option:-g}
       
       if [[ "${encrypt_option,,}" == "g" ]]; then
-        CONSUL_ENCRYPT_KEY=$(generate_consul_key)
+        CONSUL_ENCRYPT_KEY=$(generate_consul_key_with_logs)
         log_info "Nova chave de criptografia gerada: ${CONSUL_ENCRYPT_KEY}"
       else
         read -p "Informe a chave de criptografia existente: " CONSUL_ENCRYPT_KEY
@@ -190,8 +253,8 @@ main() {
       log_info "- Advertise Addr: ${CONSUL_ADVERTISE_ADDR}"
       
       # Gera chave de criptografia se não estiver definida
-      if [[ -z "$CONSUL_ENCRYPT_KEY" ]]; then
-        CONSUL_ENCRYPT_KEY=$(generate_consul_key)
+      if [[ -z "${CONSUL_ENCRYPT_KEY// }" ]]; then
+        CONSUL_ENCRYPT_KEY=$(generate_consul_key_with_logs)
         log_info "Nova chave de criptografia gerada automaticamente"
       else
         log_info "Usando chave de criptografia fornecida"
@@ -259,7 +322,7 @@ main() {
     # Instala e configura o Nomad
     setup_nomad "$NOMAD_ROLE" "$REGION" "$DC" "$NODE_NAME" "$DATA_DIR" \
                "$NOMAD_USER" "$NOMAD_GROUP" "$NOMAD_HCL" "$NOMAD_JOIN" \
-               "$NOMAD_SERVERS" "$CONSUL_BOOTSTRAP_EXPECT"
+               "$NOMAD_SERVERS" "$NOMAD_BOOTSTRAP_EXPECT"
   fi
   
   # Validação da configuração
