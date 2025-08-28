@@ -147,12 +147,11 @@ consul {
 server {
   enabled          = true
   bootstrap_expect = ${NOMAD_BOOTSTRAP_EXPECT}
-  $(if [[ -n "$NOMAD_RETRY_JOIN_ARRAY" ]]; then echo "retry_join = [$NOMAD_RETRY_JOIN_ARRAY]"; fi)
 }
 
 client {
   enabled = true
-  servers = $(if [[ -n "$NOMAD_RETRY_JOIN_ARRAY" ]]; then echo "[$NOMAD_RETRY_JOIN_ARRAY]"; else echo '["127.0.0.1"]'; fi)
+  servers = ["127.0.0.1"]
   
   # Configuração para montagens de alocações
   host_volume "alloc_mounts" {
@@ -166,6 +165,16 @@ acl {
   enabled = false
 }
 HCL
+    
+    # Adiciona retry_join se houver servidores configurados
+    if [[ -n "$NOMAD_RETRY_JOIN_ARRAY" ]]; then
+      # Adiciona retry_join na seção server
+      sed -i "/bootstrap_expect = ${NOMAD_BOOTSTRAP_EXPECT}/a\  retry_join = [$NOMAD_RETRY_JOIN_ARRAY]" "$NOMAD_HCL"
+      
+      # Atualiza a lista de servidores na seção client
+      sed -i "s/servers = \[\"127.0.0.1\"\]/servers = [$NOMAD_RETRY_JOIN_ARRAY]/" "$NOMAD_HCL"
+    fi
+    
     chown root:"${NOMAD_GROUP}" "$NOMAD_HCL"
     chmod 0640 "$NOMAD_HCL"  # Permite leitura pelo grupo nomad
 
@@ -231,6 +240,12 @@ client {
   }
 }
 HCL
+    
+    # Atualiza a lista de servidores se houver servidores configurados
+    if [[ -n "$NOMAD_RETRY_JOIN_ARRAY" ]]; then
+      sed -i "s/servers = \${NOMAD_SERVERS_JSON}/servers = [$NOMAD_RETRY_JOIN_ARRAY]/" "$NOMAD_HCL"
+    fi
+    
     chown root:"${NOMAD_GROUP}" "$NOMAD_HCL"
     chmod 0640 "$NOMAD_HCL"  # Permite leitura pelo grupo nomad
 
