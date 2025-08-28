@@ -178,6 +178,33 @@ client {
   }
 }
 
+# Configuração de portas
+ports {
+  http = 4646
+  rpc  = 4647
+  serf = 4648
+}
+
+# Plugin Docker
+plugin "docker" {
+  config {
+    endpoint = "unix:///var/run/docker.sock"
+    
+    volumes {
+      enabled = true
+    }
+    
+    allow_privileged = false
+    allow_caps = ["chown", "net_raw"]
+    
+    gc {
+      image = true
+      image_delay = "3m"
+      container = true
+    }
+  }
+}
+
 # Endurecimento leve (opcional)
 acl {
   enabled = false
@@ -263,6 +290,33 @@ client {
   host_volume "alloc_mounts" {
     path = "/opt/alloc_mounts"
     read_only = false
+  }
+}
+
+# Configuração de portas
+ports {
+  http = 4646
+  rpc  = 4647
+  serf = 4648
+}
+
+# Plugin Docker
+plugin "docker" {
+  config {
+    endpoint = "unix:///var/run/docker.sock"
+    
+    volumes {
+      enabled = true
+    }
+    
+    allow_privileged = false
+    allow_caps = ["chown", "net_raw"]
+    
+    gc {
+      image = true
+      image_delay = "3m"
+      container = true
+    }
   }
 }
 HCL
