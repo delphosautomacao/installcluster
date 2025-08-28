@@ -97,10 +97,14 @@ setup_nomad() {
   log_info "Criado diretório /opt/alloc_mounts para montagens de alocações Nomad"
 
   # Normaliza lista de Nomad servers para client ("host:4647")
-  local NOMAD_SERVERS_JSON="[]"
-  local NOMAD_RETRY_JOIN_ARRAY=""
+  NOMAD_SERVERS_JSON="[]"
+  NOMAD_RETRY_JOIN_ARRAY=""
+  
+  echo "[DEBUG] NOMAD_JOIN: ${NOMAD_JOIN}"
+  echo "[DEBUG] NOMAD_SERVERS_IN: ${NOMAD_SERVERS_IN}"
+  
   if [[ "${NOMAD_JOIN,,}" == "s" && -n "${NOMAD_SERVERS_IN// }" ]]; then
-    local arr=() IFS=',' read -ra arr <<<"$NOMAD_SERVERS_IN"
+    IFS=',' read -ra arr <<<"$NOMAD_SERVERS_IN"
     local s; local first=1; NOMAD_SERVERS_JSON="["
     local first_retry=1; NOMAD_RETRY_JOIN_ARRAY=""
     for s in "${arr[@]}"; do
@@ -122,6 +126,9 @@ setup_nomad() {
       if (( first )); then NOMAD_SERVERS_JSON+="\"$s\""; first=0; else NOMAD_SERVERS_JSON+=", \"$s\""; fi
     done
     NOMAD_SERVERS_JSON+="]"
+    
+    echo "[DEBUG] NOMAD_SERVERS_JSON gerado: $NOMAD_SERVERS_JSON"
+    echo "[DEBUG] NOMAD_RETRY_JOIN_ARRAY gerado: $NOMAD_RETRY_JOIN_ARRAY"
   fi
 
   # ---------- NOMAD HCL - SERVER ou AMBOS ----------
@@ -168,11 +175,14 @@ HCL
     
     # Adiciona retry_join se houver servidores configurados
     if [[ -n "$NOMAD_RETRY_JOIN_ARRAY" ]]; then
+      echo "[INFO] Aplicando configuração de cluster com servidores: $NOMAD_RETRY_JOIN_ARRAY"
       # Adiciona retry_join na seção server
       sed -i "/bootstrap_expect = ${NOMAD_BOOTSTRAP_EXPECT}/a\  retry_join = [$NOMAD_RETRY_JOIN_ARRAY]" "$NOMAD_HCL"
       
       # Atualiza a lista de servidores na seção client
       sed -i "s/servers = \[\"127.0.0.1\"\]/servers = [$NOMAD_RETRY_JOIN_ARRAY]/" "$NOMAD_HCL"
+    else
+      echo "[WARNING] NOMAD_RETRY_JOIN_ARRAY está vazio - cluster não será configurado"
     fi
     
     chown root:"${NOMAD_GROUP}" "$NOMAD_HCL"
@@ -243,7 +253,10 @@ HCL
     
     # Atualiza a lista de servidores se houver servidores configurados
     if [[ -n "$NOMAD_RETRY_JOIN_ARRAY" ]]; then
+      echo "[INFO] Cliente Nomad: Configurando servidores com $NOMAD_RETRY_JOIN_ARRAY"
       sed -i "s/servers = \${NOMAD_SERVERS_JSON}/servers = [$NOMAD_RETRY_JOIN_ARRAY]/" "$NOMAD_HCL"
+    else
+      echo "[INFO] Cliente Nomad: Usando configuração padrão de servidores $NOMAD_SERVERS_JSON"
     fi
     
     chown root:"${NOMAD_GROUP}" "$NOMAD_HCL"
