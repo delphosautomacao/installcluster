@@ -131,10 +131,21 @@ setup_nomad() {
     echo "[DEBUG] NOMAD_RETRY_JOIN_ARRAY gerado: $NOMAD_RETRY_JOIN_ARRAY"
   fi
 
+  # Detecta o IP da interface de rede principal
+  BIND_IP="0.0.0.0"
+  if command -v ip >/dev/null 2>&1; then
+    # Tenta detectar o IP da interface principal (não loopback)
+    DETECTED_IP=$(ip route get 8.8.8.8 2>/dev/null | grep -oP 'src \K\S+' | head -1)
+    if [[ -n "$DETECTED_IP" && "$DETECTED_IP" != "127.0.0.1" ]]; then
+      BIND_IP="$DETECTED_IP"
+      echo "[INFO] IP detectado automaticamente: $BIND_IP"
+    fi
+  fi
+  
   # ---------- NOMAD HCL - SERVER ou AMBOS ----------
   if [[ "$NOMAD_ROLE" == "1" || "$NOMAD_ROLE" == "3" ]]; then
     cat >"$NOMAD_HCL" <<HCL
-bind_addr = "0.0.0.0"
+bind_addr = "$BIND_IP"
 region    = "${REGION}"
 datacenter= "${DC}"
 name      = "${NODE_NAME}"
@@ -173,11 +184,16 @@ acl {
 }
 HCL
     
-    # Adiciona retry_join se houver servidores configurados
+    # Adiciona server_join se houver servidores configurados
     if [[ -n "$NOMAD_RETRY_JOIN_ARRAY" ]]; then
       echo "[INFO] Aplicando configuração de cluster com servidores: $NOMAD_RETRY_JOIN_ARRAY"
-      # Adiciona retry_join na seção server
-      sed -i "/bootstrap_expect = ${NOMAD_BOOTSTRAP_EXPECT}/a\  retry_join = [$NOMAD_RETRY_JOIN_ARRAY]" "$NOMAD_HCL"
+      # Adiciona server_join na seção server
+      # Adiciona server_join usando múltiplos comandos sed
+      sed -i "/bootstrap_expect = ${NOMAD_BOOTSTRAP_EXPECT}/a\\  server_join {" "$NOMAD_HCL"
+      sed -i "/server_join {/a\\    retry_join     = [$NOMAD_RETRY_JOIN_ARRAY]" "$NOMAD_HCL"
+      sed -i "/retry_join.*=/a\\    retry_max      = 3" "$NOMAD_HCL"
+      sed -i "/retry_max.*=/a\\    retry_interval = \"15s\"" "$NOMAD_HCL"
+      sed -i "/retry_interval.*=/a\\  }" "$NOMAD_HCL"
       
       # Atualiza a lista de servidores na seção client
       sed -i "s/servers = \[\"127.0.0.1\"\]/servers = [$NOMAD_RETRY_JOIN_ARRAY]/" "$NOMAD_HCL"
@@ -224,7 +240,7 @@ UNIT
   # ---------- NOMAD HCL - APENAS CLIENT ----------
   elif [[ "$NOMAD_ROLE" == "2" ]]; then
     cat >"$NOMAD_HCL" <<HCL
-bind_addr = "0.0.0.0"
+bind_addr = "$BIND_IP"
 region    = "${REGION}"
 datacenter= "${DC}"
 name      = "${NODE_NAME}"
