@@ -292,6 +292,12 @@ main() {
       read -p "Nome do nó [${NODE_NAME}]: " input
       NODE_NAME=${input:-$NODE_NAME}
       
+      # Pergunta sobre bootstrap_expect apenas para servidores
+      if [[ "$NOMAD_ROLE" == "1" || "$NOMAD_ROLE" == "3" ]]; then
+        read -p "Número de servidores esperados para bootstrap (bootstrap_expect) [${NOMAD_BOOTSTRAP_EXPECT}]: " input
+        NOMAD_BOOTSTRAP_EXPECT=${input:-$NOMAD_BOOTSTRAP_EXPECT}
+      fi
+      
       # Juntar-se a cluster existente
       read -p "Juntar-se a cluster Nomad existente? (s/n) [${NOMAD_JOIN}]: " input
       NOMAD_JOIN=${input:-$NOMAD_JOIN}

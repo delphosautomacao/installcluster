@@ -98,13 +98,26 @@ setup_nomad() {
 
   # Normaliza lista de Nomad servers para client ("host:4647")
   local NOMAD_SERVERS_JSON="[]"
+  local NOMAD_RETRY_JOIN_ARRAY=""
   if [[ "${NOMAD_JOIN,,}" == "s" && -n "${NOMAD_SERVERS_IN// }" ]]; then
     local arr=() IFS=',' read -ra arr <<<"$NOMAD_SERVERS_IN"
     local s; local first=1; NOMAD_SERVERS_JSON="["
+    local first_retry=1; NOMAD_RETRY_JOIN_ARRAY=""
     for s in "${arr[@]}"; do
       s="$(echo "$s" | xargs)"
       [[ -z "$s" ]] && continue
-      # adiciona :4647 se faltou porta
+      
+      # Para retry_join (apenas IP, sem porta)
+      local ip_only="$s"
+      if [[ "$s" == *:* ]]; then ip_only="${s%:*}"; fi
+      if (( first_retry )); then 
+        NOMAD_RETRY_JOIN_ARRAY+="\"$ip_only\""
+        first_retry=0
+      else 
+        NOMAD_RETRY_JOIN_ARRAY+=", \"$ip_only\""
+      fi
+      
+      # Para servers (com porta :4647)
       if [[ "$s" != *:* ]]; then s="${s}:4647"; fi
       if (( first )); then NOMAD_SERVERS_JSON+="\"$s\""; first=0; else NOMAD_SERVERS_JSON+=", \"$s\""; fi
     done
@@ -134,13 +147,12 @@ consul {
 server {
   enabled          = true
   bootstrap_expect = ${NOMAD_BOOTSTRAP_EXPECT}
-  # retry_join pode ser configurado aqui para formar cluster de servers (opcional)
-  # retry_join = ["10.0.0.10","10.0.0.11"]
+  $(if [[ -n "$NOMAD_RETRY_JOIN_ARRAY" ]]; then echo "retry_join = [$NOMAD_RETRY_JOIN_ARRAY]"; fi)
 }
 
 client {
   enabled = true
-  servers = ["127.0.0.1"]
+  servers = $(if [[ -n "$NOMAD_RETRY_JOIN_ARRAY" ]]; then echo "[$NOMAD_RETRY_JOIN_ARRAY]"; else echo '["127.0.0.1"]'; fi)
   
   # Configuração para montagens de alocações
   host_volume "alloc_mounts" {
@@ -155,7 +167,7 @@ acl {
 }
 HCL
     chown root:"${NOMAD_GROUP}" "$NOMAD_HCL"
-    chmod 0600 "$NOMAD_HCL"  # Mais seguro para arquivos de configuração
+    chmod 0640 "$NOMAD_HCL"  # Permite leitura pelo grupo nomad
 
     # systemd do servidor (não-root)
     cat >/etc/systemd/system/nomad.service <<UNIT
@@ -220,7 +232,7 @@ client {
 }
 HCL
     chown root:"${NOMAD_GROUP}" "$NOMAD_HCL"
-    chmod 0600 "$NOMAD_HCL"  # Mais seguro para arquivos de configuração
+    chmod 0640 "$NOMAD_HCL"  # Permite leitura pelo grupo nomad
 
     # systemd do cliente (root)
     cat >/etc/systemd/system/nomad.service <<UNIT
