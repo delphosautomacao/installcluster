@@ -153,16 +153,6 @@ name      = "${NODE_NAME}"
 
 data_dir  = "${DATA_DIR}"
 
-# Integração com Consul
-consul {
-  address = "127.0.0.1:8500"
-  server_service_name = "nomad"
-  client_service_name = "nomad-client"
-  auto_advertise = true
-  server_auto_join = true
-  client_auto_join = true
-}
-
 server {
   enabled          = true
   bootstrap_expect = ${NOMAD_BOOTSTRAP_EXPECT}
@@ -190,26 +180,13 @@ ports {
 plugin "docker" {
   config {
     endpoint = "unix:///var/run/docker.sock"
-    
-    volumes {
-      enabled = true
-    }
-    
+    volumes { enabled = true }
     allow_privileged = false
-    allow_caps = ["chown", "net_raw"]
-    
-    gc {
-      image = true
-      image_delay = "3m"
-      container = true
-    }
+    allow_caps = ["CHOWN","NET_RAW","NET_BIND_SERVICE"]
+    gc { image = true image_delay = "3m" container = true }
   }
 }
 
-# Endurecimento leve (opcional)
-acl {
-  enabled = false
-}
 HCL
     
     # Adiciona server_join se houver servidores configurados
