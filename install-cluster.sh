@@ -37,11 +37,12 @@ DC="dc1"
 NODE_NAME="$(hostname)"
 DATA_DIR="/opt/nomad"
 CONSUL_DATA_DIR="/opt/consul"
-NOMAD_USER="nomad"
-NOMAD_GROUP="nomad"
+NOMAD_USER="root"
+NOMAD_GROUP="root"
 CONSUL_USER="consul"
 CONSUL_GROUP="consul"
 NOMAD_HCL="/etc/nomad.d/nomad.hcl"
+NOMAD_HCL_DIR="/etc/nomad.d"
 CONSUL_HCL="/etc/consul.d/consul.hcl"
 NOMAD_JOIN="n"
 NOMAD_SERVERS=""
@@ -328,7 +329,7 @@ main() {
     # Instala e configura o Nomad
     setup_nomad "$NOMAD_ROLE" "$REGION" "$DC" "$NODE_NAME" "$DATA_DIR" \
                "$NOMAD_USER" "$NOMAD_GROUP" "$NOMAD_HCL" "$NOMAD_JOIN" \
-               "$NOMAD_SERVERS" "$NOMAD_BOOTSTRAP_EXPECT"
+               "$NOMAD_SERVERS" "$NOMAD_BOOTSTRAP_EXPECT" "$NOMAD_HCL_DIR"
   fi
   
   # Validação da configuração

@@ -74,6 +74,7 @@ setup_nomad() {
   local NOMAD_JOIN="$9"
   local NOMAD_SERVERS_IN="${10}"
   local NOMAD_BOOTSTRAP_EXPECT="${11}"
+  local NOMAD_HCL_DIR="${12}"
 
   log_info "Instalando Nomad..."
   install_nomad_binary
@@ -239,27 +240,33 @@ Wants=network-online.target
 After=network-online.target
 
 [Service]
-User=${NOMAD_USER}
-Group=${NOMAD_GROUP}
-ExecStart=/usr/bin/nomad agent -config=${NOMAD_HCL}
-ExecReload=/bin/kill -HUP \$MAINPID
-KillMode=process
-KillSignal=SIGINT
+ExecStart=/usr/bin/nomad agent -config=${NOMAD_HCL_DIR}
+Restart=on-failure
+RestartSec=5
 LimitNOFILE=65536
 LimitNPROC=infinity
-TasksMax=infinity
-Restart=on-failure
-RestartSec=2
-NoNewPrivileges=true
-ProtectSystem=full
-ProtectHome=true
-PrivateTmp=true
-ProtectClock=true
-ProtectHostname=true
-ProtectKernelTunables=true
-ProtectControlGroups=true
-CapabilityBoundingSet=
-AmbientCapabilities=
+
+User=root
+Group=root
+
+# Permitir acesso ao Docker
+BindPaths=/var/run/docker.sock
+
+
+#ExecReload=/bin/kill -HUP \$MAINPID
+#KillMode=process
+#KillSignal=SIGINT
+#TasksMax=infinity
+#NoNewPrivileges=true
+#ProtectSystem=full
+#ProtectHome=true
+#PrivateTmp=true
+#ProtectClock=true
+#ProtectHostname=true
+#ProtectKernelTunables=true
+#ProtectControlGroups=true
+#CapabilityBoundingSet=
+#AmbientCapabilities=
 
 [Install]
 WantedBy=multi-user.target
