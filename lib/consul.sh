@@ -109,7 +109,7 @@ bind_addr           = "0.0.0.0"
 client_addr         = "0.0.0.0"        # Permite acesso externo (ajuste conforme necessário)
 advertise_addr      = "${CONSUL_ADVERTISE_ADDR}"      # IP PRIVADO deste nó
 
-ui_config { enabled = true }      # UI disponível
+ui_config { enabled = false }      # UI disponível
 
 retry_join = ${RJ}
 data_dir  = "${CONSUL_DATA_DIR}"

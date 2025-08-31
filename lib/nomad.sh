@@ -314,7 +314,7 @@ HCL
     fi
     
     chown root:"${NOMAD_GROUP}" "$NOMAD_HCL"
-    chmod 0640 "$NOMAD_HCL"  # Permite leitura pelo grupo nomad
+    chmod 0644 "$NOMAD_HCL"  # Permite leitura pelo grupo nomad
 
     # systemd do cliente (root)
     cat >/etc/systemd/system/nomad.service <<UNIT
