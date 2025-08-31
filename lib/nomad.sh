@@ -75,6 +75,8 @@ setup_nomad() {
   local NOMAD_SERVERS_IN="${10}"
   local NOMAD_BOOTSTRAP_EXPECT="${11}"
   local NOMAD_HCL_DIR="${12}"
+  local NOMAD_HCL_SERVER="${13}"
+  local NOMAD_HCL_CLIENT="${14}"
 
   log_info "Instalando Nomad..."
   install_nomad_binary
@@ -86,7 +88,7 @@ setup_nomad() {
   fi
   if ! id -u "${NOMAD_USER}" >/dev/null 2>&1; then
     log_info "Criando usuário ${NOMAD_USER}..."
-    useradd --system --home /etc/nomad.d --shel /bin/false "$NOMAD_USER" 
+    useradd --system --home /etc/nomad.d --shell /bin/false "$NOMAD_USER" 
     sudo usermod -G docker -a "$NOMAD_USER" || log_warn "Falha ao adicionar usuário ${NOMAD_USER} ao grupo docker"
     #adduser --system --no-create-home --shell /usr/sbin/nologin --ingroup "${NOMAD_GROUP}" "${NOMAD_USER}" || log_warn "Falha ao criar usuário ${NOMAD_USER}"
   fi
@@ -99,7 +101,6 @@ setup_nomad() {
   mkdir -p /opt/alloc_mounts
   log_info "Criado diretórios"
 
-  chmod 700 "$NOMAD_HCL_DIR"
   chmod 700 "$NOMAD_HCL_DIR"
   chmod 755 /opt/alloc_mounts
   log_info "Aplicado Permissoes"
@@ -154,54 +155,99 @@ setup_nomad() {
     fi
   fi
   
-  # ---------- NOMAD HCL - SERVER ou AMBOS ----------
-  # /etc/nomad.d/nomad.hcl
-  if [[ "$NOMAD_ROLE" == "1" || "$NOMAD_ROLE" == "3" ]]; then
-    cat >"$NOMAD_HCL" <<HCL
+  # ---------- CRIAÇÃO DO ARQUIVO PRINCIPAL NOMAD.HCL (SEMPRE) ----------
+  cat >"$NOMAD_HCL" <<HCL
+bind_addr = "$BIND_IP"
+region    = "${REGION}"
 datacenter= "${DC}"
+name      = "${NODE_NAME}"
 data_dir  = "${DATA_DIR}"
+
+# Integração com Consul
+consul {
+  address = "127.0.0.1:8500"
+  server_service_name = "nomad"
+  client_service_name = "nomad-client"
+  auto_advertise = true
+  server_auto_join = true
+  client_auto_join = true
+}
+
+# Configuração de portas
+ports {
+  http = 4646
+  rpc  = 4647
+  serf = 4648
+}
 HCL
 
+  # ---------- CRIAÇÃO DO ARQUIVO SERVER.HCL (ROLES 1 e 3) ----------
   if [[ "$NOMAD_ROLE" == "1" || "$NOMAD_ROLE" == "3" ]]; then
-    cat >"$NOMAD_HCL" <<HCL
-datacenter= "${DC}"
-data_dir  = "${DATA_DIR}"
-HCL
-
-# /etc/nomad.d/server.hcl
-  if [[ "$NOMAD_ROLE" == "1" || "$NOMAD_ROLE" == "3" ]]; then
-    cat >"$NOMAD_HCL_DIR/server.hcl" <<HCL
+    cat >"$NOMAD_HCL_SERVER" <<HCL
 server {
   enabled          = true
   bootstrap_expect = ${NOMAD_BOOTSTRAP_EXPECT}
 }
 HCL
 
-# /etc/nomad.d/client.hcl
-  if [[ "$NOMAD_ROLE" == "1" || "$NOMAD_ROLE" == "3" ]]; then
-    cat >"$NOMAD_HCL_DIR/client.hcl" <<HCL
-client {
-  enabled = true
-  servers = ["127.0.0.1"]
-}
-HCL
     
     # Adiciona server_join se houver servidores configurados
     if [[ -n "$NOMAD_RETRY_JOIN_ARRAY" ]]; then
       echo "[INFO] Aplicando configuração de cluster com servidores: $NOMAD_RETRY_JOIN_ARRAY"
-      # Adiciona server_join na seção server
-      # Adiciona server_join usando múltiplos comandos sed
-      sed -i "/bootstrap_expect = ${NOMAD_BOOTSTRAP_EXPECT}/a\\  server_join {" "$NOMAD_HCL"
-      sed -i "/server_join {/a\\    retry_join     = [$NOMAD_RETRY_JOIN_ARRAY]" "$NOMAD_HCL"
-      sed -i "/retry_join.*=/a\\    retry_max      = 3" "$NOMAD_HCL"
-      sed -i "/retry_max.*=/a\\    retry_interval = \"15s\"" "$NOMAD_HCL"
-      sed -i "/retry_interval.*=/a\\  }" "$NOMAD_HCL"
-      
-      # Atualiza a lista de servidores na seção client
-      sed -i "s/servers = \[\"127.0.0.1\"\]/servers = [$NOMAD_RETRY_JOIN_ARRAY]/" "$NOMAD_HCL"
+      # Adiciona server_join na seção server do arquivo server.hcl
+      sed -i "/bootstrap_expect = ${NOMAD_BOOTSTRAP_EXPECT}/a\\  server_join {" "$NOMAD_HCL_SERVER"
+      sed -i "/server_join {/a\\    retry_join     = [$NOMAD_RETRY_JOIN_ARRAY]" "$NOMAD_HCL_SERVER"
+      sed -i "/retry_join.*=/a\\    retry_max      = 3" "$NOMAD_HCL_SERVER"
+      sed -i "/retry_max.*=/a\\    retry_interval = \"15s\"" "$NOMAD_HCL_SERVER"
+      sed -i "/retry_interval.*=/a\\  }" "$NOMAD_HCL_SERVER"
     else
       echo "[WARNING] NOMAD_RETRY_JOIN_ARRAY está vazio - cluster não será configurado"
     fi
+  fi
+
+  # ---------- CRIAÇÃO DO ARQUIVO CLIENT.HCL (ROLES 2 e 3) ----------
+  if [[ "$NOMAD_ROLE" == "2" || "$NOMAD_ROLE" == "3" ]]; then
+    cat >"$NOMAD_HCL_CLIENT" <<HCL
+client {
+  enabled = true
+  servers = ["127.0.0.1:4647"]
+  
+  # Configuração para montagens de alocações
+  host_volume "alloc_mounts" {
+    path = "/opt/alloc_mounts"
+    read_only = false
+  }
+}
+
+# Plugin Docker
+plugin "docker" {
+  config {
+    endpoint = "unix:///var/run/docker.sock"
+    
+    volumes {
+      enabled = true
+    }
+    
+    allow_privileged = false
+    allow_caps = ["chown", "net_raw"]
+    
+    gc {
+      image = true
+      image_delay = "3m"
+      container = true
+    }
+  }
+}
+HCL
+
+    # Atualiza a lista de servidores se houver servidores configurados
+    if [[ -n "$NOMAD_RETRY_JOIN_ARRAY" ]]; then
+      echo "[INFO] Cliente Nomad: Configurando servidores com $NOMAD_RETRY_JOIN_ARRAY"
+      sed -i "s/servers = \[\"127.0.0.1:4647\"\]/servers = [$NOMAD_RETRY_JOIN_ARRAY]/" "$NOMAD_HCL_CLIENT"
+    else
+      echo "[INFO] Cliente Nomad: Usando configuração padrão de servidores"
+    fi
+  fi
 
 # systemd do servidor (não-root)
     cat >/etc/systemd/system/nomad.service <<UNIT
@@ -225,7 +271,7 @@ User=nomad
 Group=nomad
 
 ExecReload=/bin/kill -HUP $MAINPID
-ExecStart=/usr/local/bin/nomad agent -config /etc/nomad.d
+ExecStart=/usr/bin/nomad agent -config /etc/nomad.d
 KillMode=process
 KillSignal=SIGINT
 LimitNOFILE=65536
@@ -255,96 +301,6 @@ OOMScoreAdjust=-1000
 WantedBy=multi-user.target
 
 UNIT
-  # ---------- NOMAD HCL - APENAS CLIENT ----------
-  elif [[ "$NOMAD_ROLE" == "2" ]]; then
-    cat >"$NOMAD_HCL" <<HCL
-bind_addr = "$BIND_IP"
-region    = "${REGION}"
-datacenter= "${DC}"
-name      = "${NODE_NAME}"
-
-data_dir  = "${DATA_DIR}"
-
-# Integração com Consul
-consul {
-  address = "127.0.0.1:8500"
-  client_service_name = "nomad-client"
-  auto_advertise = true
-  client_auto_join = true
-}
-
-client {
-  enabled = true
-  servers = ${NOMAD_SERVERS_JSON}
-  
-  # Configuração para montagens de alocações
-  host_volume "alloc_mounts" {
-    path = "/opt/alloc_mounts"
-    read_only = false
-  }
-}
-
-# Configuração de portas
-ports {
-  http = 4646
-  rpc  = 4647
-  serf = 4648
-}
-
-# Plugin Docker
-plugin "docker" {
-  config {
-    endpoint = "unix:///var/run/docker.sock"
-    
-    volumes {
-      enabled = true
-    }
-    
-    allow_privileged = false
-    allow_caps = ["chown", "net_raw"]
-    
-    gc {
-      image = true
-      image_delay = "3m"
-      container = true
-    }
-  }
-}
-HCL
-    
-    # Atualiza a lista de servidores se houver servidores configurados
-    if [[ -n "$NOMAD_RETRY_JOIN_ARRAY" ]]; then
-      echo "[INFO] Cliente Nomad: Configurando servidores com $NOMAD_RETRY_JOIN_ARRAY"
-      sed -i "s/servers = \${NOMAD_SERVERS_JSON}/servers = [$NOMAD_RETRY_JOIN_ARRAY]/" "$NOMAD_HCL"
-    else
-      echo "[INFO] Cliente Nomad: Usando configuração padrão de servidores $NOMAD_SERVERS_JSON"
-    fi
-    
-    chown root:"${NOMAD_GROUP}" "$NOMAD_HCL"
-    chmod 0644 "$NOMAD_HCL"  # Permite leitura pelo grupo nomad
-
-    # systemd do cliente (root)
-    cat >/etc/systemd/system/nomad.service <<UNIT
-[Unit]
-Description=HashiCorp Nomad Client
-Wants=network-online.target
-After=network-online.target
-
-[Service]
-ExecStart=/usr/bin/nomad agent -config=${NOMAD_HCL}
-ExecReload=/bin/kill -HUP \$MAINPID
-KillMode=process
-KillSignal=SIGINT
-LimitNOFILE=65536
-LimitNPROC=infinity
-TasksMax=infinity
-Restart=on-failure
-RestartSec=2
-
-[Install]
-WantedBy=multi-user.target
-UNIT
-  fi
 
   # Adiciona usuário nomad ao grupo docker para executar containers
   if getent group docker >/dev/null 2>&1; then
