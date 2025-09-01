@@ -163,16 +163,6 @@ datacenter= "${DC}"
 name      = "${NODE_NAME}"
 data_dir  = "${DATA_DIR}"
 
-# Integração com Consul
-consul {
-  address = "127.0.0.1:8500"
-  server_service_name = "nomad"
-  client_service_name = "nomad-client"
-  auto_advertise = true
-  server_auto_join = true
-  client_auto_join = true
-}
-
 # Configuração de portas
 ports {
   http = 4646
@@ -190,7 +180,6 @@ server {
 }
 HCL
 
-    
     # Adiciona server_join se houver servidores configurados
     if [[ -n "$NOMAD_RETRY_JOIN_ARRAY" ]]; then
       echo "[INFO] Aplicando configuração de cluster com servidores: $NOMAD_RETRY_JOIN_ARRAY"
@@ -200,7 +189,7 @@ HCL
       sed -i "/retry_join.*=/a\\    retry_max      = 3" "$NOMAD_HCL_SERVER"
       sed -i "/retry_max.*=/a\\    retry_interval = \"15s\"" "$NOMAD_HCL_SERVER"
       sed -i "/retry_interval.*=/a\\  }" "$NOMAD_HCL_SERVER"
-    else
+  else
       echo "[WARNING] NOMAD_RETRY_JOIN_ARRAY está vazio - cluster não será configurado"
     fi
   fi
@@ -241,9 +230,9 @@ plugin "docker" {
 HCL
 
     # Atualiza a lista de servidores se houver servidores configurados
-    if [[ -n "$NOMAD_RETRY_JOIN_ARRAY" ]]; then
-      echo "[INFO] Cliente Nomad: Configurando servidores com $NOMAD_RETRY_JOIN_ARRAY"
-      sed -i "s/servers = \[\"127.0.0.1:4647\"\]/servers = [$NOMAD_RETRY_JOIN_ARRAY]/" "$NOMAD_HCL_CLIENT"
+    if [[ -n "$NOMAD_SERVERS_JSON" && "$NOMAD_SERVERS_JSON" != "[]" ]]; then
+      echo "[INFO] Cliente Nomad: Configurando servidores com $NOMAD_SERVERS_JSON"
+      sed -i "s/servers = \[\"127.0.0.1:4647\"\]/servers = $NOMAD_SERVERS_JSON/" "$NOMAD_HCL_CLIENT"
     else
       echo "[INFO] Cliente Nomad: Usando configuração padrão de servidores"
     fi

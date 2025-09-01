@@ -331,7 +331,8 @@ main() {
     # Instala e configura o Nomad
     setup_nomad "$NOMAD_ROLE" "$REGION" "$DC" "$NODE_NAME" "$DATA_DIR" \
                "$NOMAD_USER" "$NOMAD_GROUP" "$NOMAD_HCL" "$NOMAD_JOIN" \
-               "$NOMAD_SERVERS" "$NOMAD_BOOTSTRAP_EXPECT" "$NOMAD_HCL_DIR"
+               "$NOMAD_SERVERS" "$NOMAD_BOOTSTRAP_EXPECT" "$NOMAD_HCL_DIR" \
+               "$NOMAD_HCL_SERVER" "$NOMAD_HCL_CLIENT"
   fi
   
   # Validação da configuração
