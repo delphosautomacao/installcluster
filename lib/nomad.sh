@@ -78,25 +78,46 @@ setup_nomad() {
   local NOMAD_HCL_SERVER="${13}"
   local NOMAD_HCL_CLIENT="${14}"
 
+  # Validação de parâmetros obrigatórios
+  if [[ -z "$NOMAD_ROLE" || -z "$REGION" || -z "$DC" || -z "$NODE_NAME" || -z "$DATA_DIR" ]]; then
+    log_error "Parâmetros obrigatórios faltando: NOMAD_ROLE, REGION, DC, NODE_NAME, DATA_DIR"
+    return 1
+  fi
+
+  if [[ -z "$NOMAD_USER" || -z "$NOMAD_GROUP" || -z "$NOMAD_HCL_DIR" ]]; then
+    log_error "Parâmetros obrigatórios faltando: NOMAD_USER, NOMAD_GROUP, NOMAD_HCL_DIR"
+    return 1
+  fi
+
+  if [[ ! "$NOMAD_ROLE" =~ ^[1-3]$ ]]; then
+    log_error "NOMAD_ROLE deve ser 1 (servidor), 2 (cliente) ou 3 (ambos)"
+    return 1
+  fi
+
   log_info "Instalando Nomad..."
-  install_nomad_binary
+  if ! install_nomad_binary; then
+    log_error "Falha na instalação do binário do Nomad"
+    return 1
+  fi
 
   # Cria usuário/grupo se não existir
-  if ! getent group "${NOMAD_GROUP}" >/dev/null 2>&1; then
-    log_info "Criando grupo ${NOMAD_GROUP}..."
-    addgroup --system "${NOMAD_GROUP}" || log_warn "Falha ao criar grupo ${NOMAD_GROUP}"
+  if ! getent group "$NOMAD_GROUP" >/dev/null 2>&1; then
+    log_info "Criando grupo $NOMAD_GROUP..."
+    addgroup --system "$NOMAD_GROUP" || log_warn "Falha ao criar grupo $NOMAD_GROUP"
   fi
-  if ! id -u "${NOMAD_USER}" >/dev/null 2>&1; then
-    log_info "Criando usuário ${NOMAD_USER}..."
-    useradd --system --home /etc/nomad.d --shell /bin/false --gid "${NOMAD_GROUP}" "$NOMAD_USER" 
-    usermod -G docker -a "$NOMAD_USER" || log_warn "Falha ao adicionar usuário ${NOMAD_USER} ao grupo docker"
+  if ! id -u "$NOMAD_USER" >/dev/null 2>&1; then
+    log_info "Criando usuário $NOMAD_USER..."
+    useradd --system --home /etc/nomad.d --shell /bin/false --gid "$NOMAD_GROUP" "$NOMAD_USER"
+    usermod -G docker -a "$NOMAD_USER" || log_warn "Falha ao adicionar usuário $NOMAD_USER ao grupo docker"
   fi
 
   # Cria diretórios
-  mkdir -p "$DATA_DIR"
-  mkdir -p "$NOMAD_HCL_DIR"
-  mkdir -p /opt/alloc_mounts
-  log_info "Criado diretórios"
+  log_info "Criando diretórios necessários..."
+  if ! mkdir -p "$DATA_DIR" "$NOMAD_HCL_DIR" /opt/alloc_mounts; then
+    log_error "Falha ao criar diretórios necessários"
+    return 1
+  fi
+  log_info "Diretórios criados com sucesso"
 
   # Aplica permissões
   chown -R "$NOMAD_USER:$NOMAD_GROUP" "$NOMAD_HCL_DIR"
@@ -107,8 +128,6 @@ setup_nomad() {
   chmod 755 "$DATA_DIR"
   chmod 755 /opt/alloc_mounts
   log_info "Aplicado permissões"
-
-
 
   # Normaliza lista de Nomad servers para client ("host:4647")
   NOMAD_SERVERS_JSON="[]"
@@ -156,29 +175,37 @@ setup_nomad() {
     fi
   fi
   
-  # ---------- CRIAÇÃO DO ARQUIVO PRINCIPAL NOMAD.HCL (SEMPRE) ----------
-  cat >"$NOMAD_HCL" <<HCL
-bind_addr = "$BIND_IP"
-region    = "${REGION}"
-datacenter= "${DC}"
-name      = "${NODE_NAME}"
-data_dir  = "${DATA_DIR}"
-
-# Configuração de portas
-ports {
-  http = 4646
-  rpc  = 4647
-  serf = 4648
-}
-HCL
-
   # ---------- CRIAÇÃO DO ARQUIVO SERVER.HCL (ROLES 1 e 3) ----------
   if [[ "$NOMAD_ROLE" == "1" || "$NOMAD_ROLE" == "3" ]]; then
     cat >"$NOMAD_HCL_SERVER" <<HCL
-server {
-  enabled          = true
-  bootstrap_expect = ${NOMAD_BOOTSTRAP_EXPECT}
-}
+
+  bind_addr = "$BIND_IP"
+  region    = "${REGION}"
+  datacenter= "${DC}"
+  name      = "${NODE_NAME}-server"
+  data_dir  = "${DATA_DIR}/server"
+
+  ports {
+    http = 4646
+    rpc  = 4647
+    serf = 4648
+  }
+
+  server {
+    enabled          = true
+    bootstrap_expect = ${NOMAD_BOOTSTRAP_EXPECT}
+  }
+  
+
+  # Integração com Consul
+  consul {
+    address = "127.0.0.1:8500"
+    server_service_name = "nomad"
+    client_service_name = "nomad-client"
+    auto_advertise = true
+    server_auto_join = true
+    client_auto_join = true
+  }  
 HCL
 
     # Adiciona server_join se houver servidores configurados
@@ -190,7 +217,7 @@ HCL
       sed -i "/retry_join.*=/a\\    retry_max      = 3" "$NOMAD_HCL_SERVER"
       sed -i "/retry_max.*=/a\\    retry_interval = \"15s\"" "$NOMAD_HCL_SERVER"
       sed -i "/retry_interval.*=/a\\  }" "$NOMAD_HCL_SERVER"
-  else
+    else
       echo "[WARNING] NOMAD_RETRY_JOIN_ARRAY está vazio - cluster não será configurado"
     fi
   fi
@@ -198,10 +225,21 @@ HCL
   # ---------- CRIAÇÃO DO ARQUIVO CLIENT.HCL (ROLES 2 e 3) ----------
   if [[ "$NOMAD_ROLE" == "2" || "$NOMAD_ROLE" == "3" ]]; then
     cat >"$NOMAD_HCL_CLIENT" <<HCL
-client {
+  bind_addr = "$BIND_IP"
+  region    = "${REGION}"
+  datacenter= "${DC}"
+  name      = "${NODE_NAME}-client"
+  data_dir  = "${DATA_DIR}/client"
+
+  ports {
+    http = 46461
+    rpc  = 46471
+    serf = 46481
+  }  
+
+  client {
   enabled = true
-  servers = ["127.0.0.1:4647"]
-  
+  servers = ["127.0.0.1:4647"] 
   # Configuração para montagens de alocações
   host_volume "alloc_mounts" {
     path = "/opt/alloc_mounts"
@@ -209,8 +247,8 @@ client {
   }
 }
 
-# Plugin Docker
-plugin "docker" {
+  # Plugin Docker
+  plugin "docker" {
   config {
     endpoint = "unix:///var/run/docker.sock"
     
@@ -219,7 +257,7 @@ plugin "docker" {
     }
     
     allow_privileged = false
-    allow_caps = ["chown", "net_raw"]
+    allow_caps = ["chown", "net_raw", "net_bind_service"]
     
     gc {
       image = true
@@ -239,29 +277,20 @@ HCL
     fi
   fi
 
-# systemd do servidor (não-root)
-    cat >/etc/systemd/system/nomad.service <<UNIT
+# systemd do servidor
+    cat >/etc/systemd/system/nomad-server.service <<UNIT
 [Unit]
-Description=Nomad
+Description=Nomad Server
 Documentation=https://www.nomadproject.io/docs/
 Wants=network-online.target
 After=network-online.target
 
-# When using Nomad with Consul it is not necessary to start Consul first. These
-# lines start Consul before Nomad as an optimization to avoid Nomad logging
-# that Consul is unavailable at startup.
-#Wants=consul.service
-#After=consul.service
-
 [Service]
-
-# Nomad server should be run as the nomad user. Nomad clients
-# should be run as root
 User=nomad
 Group=nomad
 
 ExecReload=/bin/kill -HUP $MAINPID
-ExecStart=/usr/bin/nomad agent -config /etc/nomad.d
+ExecStart=/usr/bin/nomad agent -config /etc/nomad.d/server.hcl
 KillMode=process
 KillSignal=SIGINT
 LimitNOFILE=65536
@@ -269,20 +298,34 @@ LimitNPROC=infinity
 Restart=on-failure
 RestartSec=2
 
-## Configure unit start rate limiting. Units which are started more than
-## *burst* times within an *interval* time span are not permitted to start any
-## more. Use StartLimitIntervalSec or StartLimitInterval (depending on
-## systemd version) to configure the checking interval and StartLimitBurst
-## to configure how many starts per interval are allowed. The values in the
-## commented lines are defaults.
+TasksMax=infinity
+OOMScoreAdjust=-1000
 
-# StartLimitBurst = 5
+[Install]
+WantedBy=multi-user.target
 
-## StartLimitIntervalSec is used for systemd versions >= 230
-# StartLimitIntervalSec = 10s
+UNIT
 
-## StartLimitInterval is used for systemd versions < 230
-# StartLimitInterval = 10s
+# systemd do servidor
+    cat >/etc/systemd/system/nomad-client.service <<UNIT
+[Unit]
+Description=Nomad Client
+Documentation=https://www.nomadproject.io/docs/
+Wants=network-online.target
+After=network-online.target
+
+[Service]
+User=root
+Group=root
+
+ExecReload=/bin/kill -HUP $MAINPID
+ExecStart=/usr/bin/nomad agent -config /etc/nomad.d/client.hcl
+KillMode=process
+KillSignal=SIGINT
+LimitNOFILE=65536
+LimitNPROC=infinity
+Restart=on-failure
+RestartSec=2
 
 TasksMax=infinity
 OOMScoreAdjust=-1000
@@ -294,10 +337,10 @@ UNIT
 
   # Adiciona usuário nomad ao grupo docker para executar containers
   if getent group docker >/dev/null 2>&1; then
-    log_info "Adicionando usuário ${NOMAD_USER} ao grupo docker..."
-    gpasswd -a "${NOMAD_USER}" docker || log_warn "Falha ao adicionar usuário ao grupo docker"
+    log_info "Adicionando usuário nomad ao grupo docker..."
+    gpasswd -a nomad docker || log_warn "Falha ao adicionar usuário ao grupo docker"
   else
-    log_warn "Grupo docker não encontrado. Usuário ${NOMAD_USER} não foi adicionado ao grupo docker."
+    log_warn "Grupo docker não encontrado. Usuário nomad não foi adicionado ao grupo docker."
   fi
 	
   # Habilita conforme papel
