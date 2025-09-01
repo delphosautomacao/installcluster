@@ -80,19 +80,6 @@ setup_nomad() {
 
   log_info "Instalando Nomad..."
   install_nomad_binary
-
-  # Cria usuário/grupo se não existir
-  if ! getent group "${NOMAD_GROUP}" >/dev/null 2>&1; then
-    log_info "Criando grupo ${NOMAD_GROUP}..."
-    addgroup --system "${NOMAD_GROUP}" || log_warn "Falha ao criar grupo ${NOMAD_GROUP}"
-  fi
-  if ! id -u "${NOMAD_USER}" >/dev/null 2>&1; then
-    log_info "Criando usuário ${NOMAD_USER}..."
-    useradd --system --home /etc/nomad.d --shell /bin/false "$NOMAD_USER" 
-    sudo usermod -G docker -a "$NOMAD_USER" || log_warn "Falha ao adicionar usuário ${NOMAD_USER} ao grupo docker"
-    #adduser --system --no-create-home --shell /usr/sbin/nologin --ingroup "${NOMAD_GROUP}" "${NOMAD_USER}" || log_warn "Falha ao criar usuário ${NOMAD_USER}"
-  fi
-
   # Dirs base / permissões
   #install -d -m 0750 -o root -g "${NOMAD_GROUP}" /etc/nomad.d
   #install -d -m 0750 -o "${NOMAD_USER}" -g "${NOMAD_GROUP}" "${DATA_DIR}"
@@ -101,8 +88,17 @@ setup_nomad() {
   mkdir -p /opt/alloc_mounts
   log_info "Criado diretórios"
 
+  chown -R "$NOMAD_USER:$NOMAD_GROUP" "$NOMAD_HCL_DIR"
+  chown -R "$NOMAD_USER:$NOMAD_GROUP" "$DATA_DIR"
+  chown -R "$NOMAD_USER:$NOMAD_GROUP" "/opt/alloc_mounts"
+
   chmod 700 "$NOMAD_HCL_DIR"
+  chmod 700 "$DATA_DIR"
   chmod 755 /opt/alloc_mounts
+
+  useradd --system --home /etc/nomad.d --shell /bin/false "$NOMAD_USER"
+  sudo usermod -G docker -a "$NOMAD_USER" || log_warn "Falha ao adicionar usuário ${NOMAD_USER} ao grupo docker"
+
   log_info "Aplicado Permissoes"
 
   # Diretório para montagens de alocações Nomad
