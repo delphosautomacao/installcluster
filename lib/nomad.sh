@@ -277,7 +277,9 @@ HCL
     fi
   fi
 
+
 # systemd do servidor
+if [[ "$NOMAD_ROLE" == "1" || "$NOMAD_ROLE" == "3" ]]; then
     cat >/etc/systemd/system/nomad-server.service <<UNIT
 [Unit]
 Description=Nomad Server
@@ -305,8 +307,11 @@ OOMScoreAdjust=-1000
 WantedBy=multi-user.target
 
 UNIT
+fi
 
-# systemd do servidor
+
+# systemd do client
+if [[ "$NOMAD_ROLE" == "2" || "$NOMAD_ROLE" == "3" ]]; then
     cat >/etc/systemd/system/nomad-client.service <<UNIT
 [Unit]
 Description=Nomad Client
@@ -334,6 +339,7 @@ OOMScoreAdjust=-1000
 WantedBy=multi-user.target
 
 UNIT
+fi
 
   # Adiciona usuário nomad ao grupo docker para executar containers
   if getent group docker >/dev/null 2>&1; then
@@ -345,8 +351,14 @@ UNIT
 	
   # Habilita conforme papel
   systemctl daemon-reload
-  systemctl enable nomad.service
-  systemctl restart nomad.service
+if [[ "$NOMAD_ROLE" == "1" || "$NOMAD_ROLE" == "3" ]]; then  
+  systemctl enable nomad-server.service
+  systemctl restart nomad-server.service
+fi
+if [[ "$NOMAD_ROLE" == "2" || "$NOMAD_ROLE" == "3" ]]; then
+  systemctl enable nomad-client.service
+  systemctl restart nomad-client.service
+fi
   
   log_info "Nomad instalado e configurado com sucesso!"
 }
