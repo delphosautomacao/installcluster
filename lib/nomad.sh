@@ -191,6 +191,12 @@ setup_nomad() {
     serf = 4648
   }
 
+  advertise {
+    http = "$BIND_IP"
+    rpc  = "$BIND_IP"
+    serf = "$BIND_IP"
+  }
+  
   server {
     enabled          = true
     bootstrap_expect = ${NOMAD_BOOTSTRAP_EXPECT}
