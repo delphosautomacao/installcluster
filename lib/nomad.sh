@@ -251,6 +251,10 @@ HCL
     path = "/opt/alloc_mounts"
     read_only = false
   }
+  meta {
+    node = "${NODE_NAME}"
+  }
+
 }
 
   # Plugin Docker
